@@ -279,29 +279,29 @@ function checkErrorType(errorEvent, global, kind) {
   }
 }
 
-function checkErr(negative, pass, fail) {
+function checkErr(negative, pass, fail, mode) {
   return function(err, w) {
     if (err === errSigil) {
       if (negative) {
-        fail('Expecting ' + negative.phase + ' ' + negative.type + ', but no error was thrown.');
+        fail('Expecting ' + negative.phase + ' ' + negative.type + ', but no error was thrown.',mode);
       } else {
-        pass();
+        pass(mode);
       }
     } else if (err === noCompletionSigil) {
-      fail('Test timed out.');
+      fail('Test timed out.',mode);
     } else {
       if (negative) {
         if (checkErrorType(err, w, negative.type)) {
-          pass();
+          pass(mode);
         } else {
           if (negative.phase === 'early' && err.message && err.message.match('NotEarlyError')) {
-            fail('Expecting early ' + negative.type + ', but parsing succeeded without errors.');
+            fail('Expecting early ' + negative.type + ', but parsing succeeded without errors.',mode);
           } else {
-            fail('Expecting ' + negative.phase + ' ' + negative.type + ', but got an error of another kind.');  // todo more precise complaints
+            fail('Expecting ' + negative.phase + ' ' + negative.type + ', but got an error of another kind.',mode);  // todo more precise complaints
           }
         }
-      } else {
-        fail('Unexpected error: ' + err.message.replace(/^uncaught\W+/i, ''));
+          } else {
+        fail('Unexpected error: ' + err.message.replace(/^uncaught\W+/i, ''),mode);
       }
     }
   };
@@ -345,36 +345,58 @@ function runTest262Test(src, pass, fail, skip) {
 
   if (meta.flags.raw) {
     // Note: we cannot assert phase for these, so false positives are possible.
-    runSources(includeSrcs.concat([src]), isAsync, needsAPI, checkErr(meta.negative, pass, fail));
+    runSources(includeSrcs.concat([src]), isAsync, needsAPI, checkErr(meta.negative, pass, fail, 'non-strict'));
     return;
   }
   if (!meta.flags.strict) {
     // run in both strict and non-strict
     runSources(includeSrcs.concat([strict(src)]), isAsync, needsAPI, checkErr(meta.negative, function() {
-      runSources(includeSrcs.concat([src]), isAsync, needsAPI, checkErr(meta.negative, pass, fail));
-    }, fail));
+      runSources(includeSrcs.concat([src]), isAsync, needsAPI, checkErr(meta.negative, pass, fail, 'non-strict (strict passed)'));
+    }, fail, 'strict'));
   } else {
-    runSources(includeSrcs.concat([meta.flags.strict === 'always' ? strict(src) : src]), isAsync, needsAPI, checkErr(meta.negative, pass, fail));
+    runSources(includeSrcs.concat([meta.flags.strict === 'always' ? strict(src) : src]), isAsync, needsAPI, checkErr(meta.negative, pass, fail, 'strict'));
   }
 }
 
 
 // tree rendering / running
 
-function makeFailEle(path, msg) {
+function makeResultEle(path, msg, mode) {
   var ele = document.createElement('li');
   var pathSpan = ele.appendChild(document.createElement('span'));
   pathSpan.style.fontFamily = 'monospace';
-  pathSpan.textContent = path.slice(1).join('/');
+  pathSpan.textContent = path.slice(1).join('/') + ' ' + mode;
   addSrcLink(ele, path);
   var msgEle = ele.appendChild(document.createElement('p'));
   msgEle.textContent = msg;
   return ele;
 }
 
+var passedTests = [];
+function addPass(path, mode) {
+  passedTests.push({path: path, ele: makeResultEle(path,"", mode)});
+  passedTests.sort(function(a, b) {
+    if (a.path < b.path) {
+      return -1;
+    } else if (b.path < a.path) {
+      return 1;
+    } else {
+      return 0;
+    }
+  });
+  document.getElementById('passes').style.display = '';
+  var passList = document.getElementById('passList');
+  passList.innerHTML = '';
+  passedTests.forEach(function(o) {
+    passList.appendChild(o.ele);
+  });
+  document.getElementById('passesCount').textContent = passedTests.length;
+}
+
 var failedTests = [];
-function addFailure(path, msg) {
-  failedTests.push({path: path, ele: makeFailEle(path, msg)});
+function addFailure(path, msg, mode) {
+
+  failedTests.push({path: path, ele: makeResultEle(path, msg, mode)});
   failedTests.sort(function(a, b) {
     if (a.path < b.path) {
       return -1;
@@ -429,7 +451,8 @@ function runSubtree(root, then, ancestors, toExpand) {
       });
       status.textContent = 'Running...';
       status.className = 'running';
-      runTest262Test(data, function() {
+      runTest262Test(data, function(mode) {
+        addPass(root.path, mode);
         status.textContent = 'Pass!';
         status.className = 'pass';
         root.passes = 1;
@@ -438,8 +461,8 @@ function runSubtree(root, then, ancestors, toExpand) {
         increment(ancestors);
         then(1, 0, 0);
         complete(task);
-      }, function(msg) {
-        addFailure(root.path, msg);
+      }, function(msg, mode) {
+        addFailure(root.path, msg, mode);
         status.textContent = msg;
         status.className = 'fail fail-message';
         root.passes = 0;
@@ -710,6 +733,11 @@ window.addEventListener('load', function() {
     req.open('GET', zipballUrl);
     req.responseType = 'arraybuffer'; // todo check support
     req.send();
+  });
+
+  document.getElementById('passesToggle').addEventListener('click', function() {
+    var passList = document.getElementById('passList');
+    passList.style.display = passList.style.display === 'none' ? '' : 'none';
   });
 
   document.getElementById('failuresToggle').addEventListener('click', function() {
